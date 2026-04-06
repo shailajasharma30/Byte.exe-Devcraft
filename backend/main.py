@@ -1,20 +1,54 @@
 from contextlib import asynccontextmanager
+import logging
 from typing import List
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from model_loader import ModelNotReadyError, model_service
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 class PatientVitals(BaseModel):
-    Age: int = Field(ge=5, le=65)
-    SystolicBP: int = Field(ge=70, le=200)
-    DiastolicBP: int = Field(ge=40, le=150)
-    BloodGlucose: float = Field(ge=6, le=20)
-    BodyTemp: float = Field(ge=35, le=42)
-    HeartRate: int = Field(ge=40, le=150)
+    """
+    Accepts both PascalCase (Age) and snake_case (age) field names.
+    Pydantic rejects requests outside the validated ranges with HTTP 422.
+    """
+    model_config = ConfigDict(populate_by_name=True)
+
+    Age: int = Field(
+        ge=5, le=65,
+        validation_alias=AliasChoices("Age", "age"),
+        description="Patient age in years (5–65)",
+    )
+    SystolicBP: int = Field(
+        ge=70, le=200,
+        validation_alias=AliasChoices("SystolicBP", "systolic_bp"),
+        description="Systolic blood pressure mmHg (70–200)",
+    )
+    DiastolicBP: int = Field(
+        ge=40, le=150,
+        validation_alias=AliasChoices("DiastolicBP", "diastolic_bp"),
+        description="Diastolic blood pressure mmHg (40–150)",
+    )
+    BloodGlucose: float = Field(
+        ge=6.0, le=20.0,
+        validation_alias=AliasChoices("BloodGlucose", "blood_glucose"),
+        description="Blood glucose mmol/L (6–20)",
+    )
+    BodyTemp: float = Field(
+        ge=35.0, le=42.0,
+        validation_alias=AliasChoices("BodyTemp", "body_temp"),
+        description="Body temperature °C (35–42)",
+    )
+    HeartRate: int = Field(
+        ge=40, le=150,
+        validation_alias=AliasChoices("HeartRate", "heart_rate"),
+        description="Heart rate bpm (40–150)",
+    )
 
 
 class PredictionResponse(BaseModel):
@@ -32,7 +66,11 @@ class HealthResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    model_service.load_model()
+    loaded = model_service.load_model()
+    if loaded:
+        logger.info("MaternalGuard: model artifacts loaded — /predict is live")
+    else:
+        logger.warning("MaternalGuard: model artifacts NOT found — /predict will return 503")
     yield
 
 
